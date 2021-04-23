@@ -14,16 +14,11 @@ limitations under the License. */
 
 #pragma once
 
+#include <glog/logging.h>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-#ifdef PADDLE_WITH_CUDA
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#endif
-
-#include <glog/logging.h>
 
 #include "paddle/fluid/framework/ddim.h"
 #include "paddle/fluid/framework/mixed_vector.h"

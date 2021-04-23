@@ -76,6 +76,11 @@ class TestVarBase(unittest.TestCase):
                     y = x.cuda(blocking=True)
                     self.assertEqual(y.place.__repr__(), "CUDAPlace(0)")
 
+                # support 'dtype' is core.VarType
+                x = paddle.rand((2, 2))
+                y = paddle.to_tensor([2, 2], dtype=x.dtype)
+                self.assertEqual(y.dtype, core.VarDesc.VarType.FP32)
+
                 # set_default_dtype take effect on complex
                 x = paddle.to_tensor(1 + 2j, place=place, stop_gradient=False)
                 self.assertTrue(np.array_equal(x.numpy(), [1 + 2j]))
@@ -497,6 +502,15 @@ class TestVarBase(unittest.TestCase):
                 np.array_equal(var.numpy(),
                                fluid.framework._var_base_to_np(var)))
 
+    def test_var_base_as_np(self):
+        with fluid.dygraph.guard():
+            var = fluid.dygraph.to_variable(self.array)
+            self.assertTrue(np.array_equal(var.numpy(), np.array(var)))
+            self.assertTrue(
+                np.array_equal(
+                    var.numpy(), np.array(
+                        var, dtype=np.float32)))
+
     def test_if(self):
         with fluid.dygraph.guard():
             var1 = fluid.dygraph.to_variable(np.array([[[0]]]))
@@ -631,9 +645,13 @@ class TestVarBase(unittest.TestCase):
 class TestVarBaseSetitem(unittest.TestCase):
     def setUp(self):
         paddle.disable_static()
-        self.tensor_x = paddle.to_tensor(np.ones((4, 2, 3)).astype(np.float32))
-        self.np_value = np.random.random((2, 3)).astype(np.float32)
+        self.set_dtype()
+        self.tensor_x = paddle.to_tensor(np.ones((4, 2, 3)).astype(self.dtype))
+        self.np_value = np.random.random((2, 3)).astype(self.dtype)
         self.tensor_value = paddle.to_tensor(self.np_value)
+
+    def set_dtype(self):
+        self.dtype = "int32"
 
     def _test(self, value):
         paddle.disable_static()
@@ -644,7 +662,7 @@ class TestVarBaseSetitem(unittest.TestCase):
         self.assertEqual(self.tensor_x.inplace_version, 1)
 
         if isinstance(value, (six.integer_types, float)):
-            result = np.zeros((2, 3)).astype(np.float32) + value
+            result = np.zeros((2, 3)).astype(self.dtype) + value
 
         else:
             result = self.np_value
@@ -674,9 +692,24 @@ class TestVarBaseSetitem(unittest.TestCase):
         paddle.disable_static()
         self._test(10)
 
+
+class TestVarBaseSetitemInt64(TestVarBaseSetitem):
+    def set_dtype(self):
+        self.dtype = "int64"
+
+
+class TestVarBaseSetitemFp32(TestVarBaseSetitem):
+    def set_dtype(self):
+        self.dtype = "float32"
+
     def test_value_float(self):
         paddle.disable_static()
         self._test(3.3)
+
+
+class TestVarBaseSetitemFp64(TestVarBaseSetitem):
+    def set_dtype(self):
+        self.dtype = "float64"
 
 
 class TestVarBaseInplaceVersion(unittest.TestCase):

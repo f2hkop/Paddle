@@ -17,9 +17,16 @@
 #include <string>
 #include <vector>
 
-#if defined(PADDLE_WITH_NCCL)
+#if defined(PADDLE_WITH_NCCL) || defined(PADDLE_WITH_RCCL)
 #include "paddle/fluid/platform/cuda_resource_pool.h"
+#endif
+
+#ifdef PADDLE_WITH_NCCL
 #include "paddle/fluid/platform/dynload/nccl.h"
+#endif
+
+#ifdef PADDLE_WITH_RCCL
+#include "paddle/fluid/platform/dynload/rccl.h"
 #endif
 
 #include "paddle/fluid/imperative/parallel_context.h"
@@ -33,7 +40,7 @@ class Variable;
 namespace paddle {
 namespace imperative {
 
-#if defined(PADDLE_WITH_NCCL)
+#if defined(PADDLE_WITH_NCCL) || defined(PADDLE_WITH_RCCL)
 class NCCLParallelContext : public ParallelContext {
  public:
   explicit NCCLParallelContext(const ParallelStrategy& strategy,
@@ -46,6 +53,8 @@ class NCCLParallelContext : public ParallelContext {
 
   void Init() override;
 
+  void InitWithRingID(int ring_id) override;
+
   void AllReduceByStream(const framework::Variable& src,
                          framework::Variable* dst, int ring_id,
                          bool use_calc_stream) override;
@@ -55,6 +64,8 @@ class NCCLParallelContext : public ParallelContext {
   void WaitCompute(int ring_id) override;
 
   void WaitComm(int ring_id) override;
+
+  void SynchronizeCompute() override;
 
  private:
   // used for comm wait compute, compute_stream-->event-->comm_stream[ring_id]

@@ -75,14 +75,15 @@ int test_predictor_zero_copy(const AnalysisConfig& config_in,
   }
 
   std::vector<float> input({1});
-  auto in_tensor{predictor->GetInputTensor(predictor->GetInputNames().front())};
+  auto in_tensor =
+      predictor->GetInputTensor(predictor->GetInputNames().front());
   in_tensor->Reshape({1, 1});
   in_tensor->copy_from_cpu(input.data());
 
   predictor->ZeroCopyRun();
 
-  auto out_tensor{
-      predictor->GetOutputTensor(predictor->GetOutputNames().front())};
+  auto out_tensor =
+      predictor->GetOutputTensor(predictor->GetOutputNames().front());
   std::vector<float> data_o(10);
   out_tensor->copy_to_cpu(data_o.data());
 
@@ -118,7 +119,7 @@ TEST(AnalysisPredictor, lite_xpu) {
 }
 #endif
 
-#ifdef PADDLE_WITH_CUDA
+#if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
 TEST(AnalysisPredictor, thread_local_stream) {
   const size_t thread_num = 5;
   std::vector<std::thread> threads(thread_num);

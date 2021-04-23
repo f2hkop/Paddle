@@ -14,7 +14,7 @@
 
 #include "paddle/fluid/imperative/nccl_context.h"
 
-#if defined(PADDLE_WITH_NCCL)
+#if defined(PADDLE_WITH_NCCL) || defined(PADDLE_WITH_RCCL)
 #include "paddle/fluid/imperative/all_reduce.h"
 #include "paddle/fluid/platform/collective_helper.h"
 #include "paddle/fluid/platform/gen_comm_id_helper.h"
@@ -31,7 +31,7 @@ class Variable;
 
 namespace paddle {
 namespace imperative {
-#if defined(PADDLE_WITH_NCCL)
+#if defined(PADDLE_WITH_NCCL) || defined(PADDLE_WITH_RCCL)
 
 void NCCLParallelContext::BcastNCCLId(
     std::vector<ncclUniqueId> &nccl_ids,  // NOLINT
@@ -79,6 +79,30 @@ void NCCLParallelContext::Init() {
   }
 }
 
+void NCCLParallelContext::InitWithRingID(int ring_id) {
+  std::vector<ncclUniqueId> nccl_ids;
+  nccl_ids.resize(1);
+
+  if (strategy_.local_rank_ == 0) {
+    // generate the unique ncclid on the root worker
+    platform::dynload::ncclGetUniqueId(&nccl_ids[0]);
+  }
+  BcastNCCLId(nccl_ids, 0);
+
+  int gpu_id = BOOST_GET_CONST(platform::CUDAPlace, place_).device;
+  VLOG(0) << "init nccl context nranks: " << strategy_.nranks_
+          << " local rank: " << strategy_.local_rank_ << " gpu id: " << gpu_id
+          << " ring id: " << ring_id;
+  // it will assign nccl_comm in CUDADeviceContext within ring_id
+  platform::NCCLCommContext::Instance().CreateNCCLComm(
+      &nccl_ids[0], strategy_.nranks_, strategy_.local_rank_, gpu_id, ring_id);
+
+  compute_events_.emplace_back(platform::CudaEventResourcePool::Instance().New(
+      BOOST_GET_CONST(platform::CUDAPlace, place_).device));
+  comm_events_.emplace_back(platform::CudaEventResourcePool::Instance().New(
+      BOOST_GET_CONST(platform::CUDAPlace, place_).device));
+}
+
 void NCCLParallelContext::AllReduceByStream(const framework::Variable &src,
                                             framework::Variable *dst,
                                             int ring_id, bool use_calc_stream) {
@@ -113,9 +137,14 @@ void NCCLParallelContext::WaitCompute(int ring_id) {
       platform::NCCLCommContext::Instance().Get(ring_id, place_)->stream();
   auto event = compute_events_[ring_id].get();
 
-  // compute_stream-->event-->comm_stream
+// compute_stream-->event-->comm_stream
+#ifdef PADDLE_WITH_HIP
+  PADDLE_ENFORCE_CUDA_SUCCESS(hipEventRecord(event, compute_stream));
+  PADDLE_ENFORCE_CUDA_SUCCESS(hipStreamWaitEvent(comm_stream, event, 0));
+#else
   PADDLE_ENFORCE_CUDA_SUCCESS(cudaEventRecord(event, compute_stream));
   PADDLE_ENFORCE_CUDA_SUCCESS(cudaStreamWaitEvent(comm_stream, event, 0));
+#endif
 }
 
 void NCCLParallelContext::WaitComm(int ring_id) {
@@ -134,9 +163,20 @@ void NCCLParallelContext::WaitComm(int ring_id) {
       platform::NCCLCommContext::Instance().Get(ring_id, place_)->stream();
   auto event = comm_events_[ring_id].get();
 
-  // comm_stream-->event-->compute_stream
+// comm_stream-->event-->compute_stream
+#ifdef PADDLE_WITH_HIP
+  PADDLE_ENFORCE_CUDA_SUCCESS(hipEventRecord(event, comm_stream));
+  PADDLE_ENFORCE_CUDA_SUCCESS(hipStreamWaitEvent(compute_stream, event, 0));
+#else
   PADDLE_ENFORCE_CUDA_SUCCESS(cudaEventRecord(event, comm_stream));
   PADDLE_ENFORCE_CUDA_SUCCESS(cudaStreamWaitEvent(compute_stream, event, 0));
+#endif
+}
+
+void NCCLParallelContext::SynchronizeCompute() {
+  auto *compute_dev_ctx = static_cast<platform::CUDADeviceContext *>(
+      platform::DeviceContextPool::Instance().Get(place_));
+  compute_dev_ctx->Wait();
 }
 
 #endif
