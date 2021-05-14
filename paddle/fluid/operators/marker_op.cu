@@ -1,11 +1,8 @@
 /* Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
     http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,12 +13,13 @@ limitations under the License. */
 #include "paddle/fluid/platform/profiler.h"
 #include "paddle/fluid/framework/data_type.h"
 #include "paddle/fluid/framework/eigen.h"
+#include "paddle/fluid/framework/tensor_util.h"
 
 namespace paddle {
 namespace operators {
 
 template <typename T>
-__global__ void SimpleMarkerKernel(const T* in, T* out, int ndim) {
+__global__ void SimpleMarkerKernel(T* in, T* out, int ndim) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     for (; idx < ndim; idx += blockDim.x * gridDim.x) {
     out[idx] = in[idx];
@@ -29,20 +27,23 @@ __global__ void SimpleMarkerKernel(const T* in, T* out, int ndim) {
 };
 
 template <typename T>
-    class MarkerOpCUDAKernel : public framework::OpKernel<T> {
+class MarkerOpCUDAKernel : public framework::OpKernel<T> {
     public:
         void Compute(const framework::ExecutionContext& ctx) const override {
             auto& dev_ctx = ctx.template device_context<platform::CUDADeviceContext>();
+
             auto x = ctx.Input<framework::Tensor>("X");
-            auto out = ctx.Output<framework::Tensor>("Out");
-            auto dim_x = x->dims();
             auto marker_role = ctx.Attr<std::string>("marker_role");
             auto marker_pos = ctx.Attr<std::string>("marker_pos");
-            auto x_data = x->data<T>();
-            auto out_data = out->mutable_data<T>(ctx.GetPlace());
+            VLOG(3)<<"marker role: "<<marker_role<<" marker position: "<< marker_pos;
+            auto* x_data = x->data<T>();
 
-            platform::RecordEvent record_event("Marker", platform::EventRole::kInnerOp, "marker_"+marker_role+"_"+"marker_pos");
-            SimpleMarkerKernel<T><<<1,dim_x[0],0,dev_ctx.stream()>>>(x_data, out_data, dim_x[0]);
+            framework::Tensor A;
+            framework::Tensor B;
+            auto* in_temp = A.mutable_data<T>({32,1}, ctx.GetPlace());
+            auto* out_temp = B.mutable_data<T>({32,1}, ctx.GetPlace());
+            platform::RecordEvent record_event("MarkerCUDA", platform::EventRole::kInnerOp, "marker_"+marker_role+"_"+marker_pos);
+            SimpleMarkerKernel<T><<<1,32,0,dev_ctx.stream()>>>(in_temp, out_temp, 32);
     }
 };
 
